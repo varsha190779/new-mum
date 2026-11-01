@@ -8,10 +8,8 @@ const LINKS = [
 export function Wordmark() {
   return (
     <a href="#top" className="flex items-center gap-2.5" aria-label="Optimum Network Observatory, top of page">
-      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-        <circle cx="11" cy="11" r="10" fill="none" stroke="#0C100D" strokeWidth="1.5" />
-        <circle cx="11" cy="11" r="4.2" fill="#1E8A4C" />
-      </svg>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo.png" alt="" width="32" height="32" className="h-8 w-8 rounded-[9px] border border-line" />
       <span className="text-[15px] font-semibold tracking-tight">Optimum</span>
       <span className="hidden text-[15px] text-ink-3 sm:inline">Network Observatory</span>
     </a>
