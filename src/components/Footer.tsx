@@ -19,6 +19,7 @@ export function Footer() {
           <a className="hover:text-ink" href="#lab">Lab</a>
           <a className="hover:text-ink" href="#how">How it works</a>
           <a className="hover:text-ink" href="#compare">Compare</a>
+          <a className="hover:text-ink" href="#report">Report</a>
           <a className="hover:text-ink" href="#why">Why it matters</a>
         </div>
       </div>

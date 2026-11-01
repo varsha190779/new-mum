@@ -2,18 +2,22 @@ import { buildTopology, type Topology } from "./graph";
 import { mulberry32 } from "./rng";
 
 /**
- * Toy propagation model. It is NOT Optimum telemetry and makes no claim about
- * real-world performance; it exists to show the *shape* of the two approaches:
+ * Illustrative propagation model. It is NOT Optimum telemetry and does not
+ * reproduce any measured data; it exists to show the *shape* of two approaches
+ * under identical conditions (same topology, payload, latencies, loss/jitter
+ * draws per link and seed):
  *
- *  - traditional: a whole block is received, then forwarded in full to peers.
- *  - mump2p + RLNC: the block is K pieces; peers exchange coded packets
- *    (random combinations) and forward recoded packets as soon as they gain
- *    new information, before the whole block is reconstructed.
+ *  - traditional: the block is K original pieces. Peers flood each piece they
+ *    have not seen to their neighbours. A peer reconstructs only once it holds
+ *    every distinct piece, so a late or lost piece holds it up, and the same
+ *    piece can arrive several times (duplicates).
+ *  - mump2p + RLNC: the same K pieces are mixed into coded packets of the same
+ *    size. Peers recode what they hold, forward once they have a few packets,
+ *    and a peer reconstructs after K *independent* packets, whichever they are.
+ *    A packet is likely, not certain, to be independent. Decoded peers tell
+ *    neighbours to stop sending (IDONTWANT-style).
  *
- * Rank model: a peer reconstructs when it holds K *independent* packets. A
- * packet is innovative with high (not certain) probability and only if the
- * sender knows something the receiver does not (sender rank > receiver rank,
- * with a small chance otherwise). Dependent packets are counted as redundant.
+ * All metrics are derived from this one event history.
  */
 export type Mode = "traditional" | "mump2p";
 export type Condition = "stable" | "congested";
@@ -24,12 +28,14 @@ export interface SimConfig {
   mode: Mode;
 }
 
-export const K = 8; // pieces per block
+export const K = 8; // pieces per block (illustrative)
+const SOURCE_COPIES = 1; // source emits K packets in both modes (traditional: each original piece once)
 const EDGE_CAP = K + 3; // max coded packets per directed edge
-const FANOUT = 2; // coded forwards per innovative packet
-const FORWARD_AFTER = 2; // peers start recoding/forwarding once they hold this many independent packets
-const P_INNOVATIVE = 0.94; // sender has info receiver lacks
-const P_INNOVATIVE_EQUAL = 0.3; // sender rank <= receiver rank
+const FANOUT = 3; // coded forwards per innovative packet
+const FORWARD_AFTER = 1; // peers start recoding/forwarding once they hold this many independent packets
+const P_INNOVATIVE = 0.94; // sender has information the receiver lacks
+const P_INNOVATIVE_EQUAL = 0.3; // sender knows no more than the receiver
+const PIECE_SIZE = 1 / K; // both modes: same packet size, in block-equivalents
 const STEP = 1 / 60;
 const MAX_TIME = 60;
 
@@ -42,19 +48,21 @@ export interface Packet {
   id: number;
   from: number;
   to: number;
-  kind: "full" | "coded";
+  kind: "piece" | "coded";
+  piece: number; // original piece index (traditional) or -1
   size: number;
   start: number;
   arrive: number;
   lost: boolean;
   retry: boolean;
   senderRank: number;
-  tint: number; // 0..3 for visual variety of coded packets
+  tint: number;
   tint2: number;
 }
 export interface NodeState {
+  /** distinct pieces held (traditional) or independent packets held (mump2p) */
   rank: number;
-  hasBlock: boolean;
+  have: boolean[]; // traditional: which original pieces are held
   doneAt: number | null;
   firstAt: number | null;
   received: number;
@@ -74,6 +82,22 @@ export interface Counters {
   redundantUnits: number;
 }
 
+function hash(...n: number[]): number {
+  let h = 2166136261;
+  for (const v of n) {
+    h ^= v + 0x9e3779b9;
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+export function percentile(sorted: number[], q: number): number | null {
+  if (!sorted.length) return null;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
+  const v = sorted[idx];
+  return Number.isFinite(v) ? v : null;
+}
+
 export class Simulation {
   readonly topo: Topology;
   readonly cfg: SimConfig;
@@ -88,10 +112,12 @@ export class Simulation {
   endTime: number | null = null;
 
   private clock = 0;
-  private pending: { at: number; from: number; to: number }[] = [];
+  private pending: { at: number; from: number; to: number; piece: number }[] = [];
   private rng: () => number;
-  private edgeFree = new Map<number, number>();
+  private seed: number;
+  private uplinkFree = new Map<number, number>();
   private edgeSent = new Map<number, number>();
+  private edgeCount = new Map<number, number>();
   private latency = new Map<number, number>();
   private nextId = 1;
   private lastHist = 0;
@@ -103,10 +129,11 @@ export class Simulation {
     this.cfg = cfg;
     this.topo = buildTopology(cfg.size);
     this.peerCount = this.topo.nodes.length - 1;
-    this.rng = mulberry32(9100 + cfg.size * 31 + (cfg.condition === "stable" ? 1 : 2));
+    this.seed = 9100 + cfg.size * 31 + (cfg.condition === "stable" ? 1 : 2);
+    this.rng = mulberry32(this.seed ^ (cfg.mode === "mump2p" ? 0x5bd1e995 : 0x1b873593));
     this.nodes = this.topo.nodes.map(() => ({
       rank: 0,
-      hasBlock: false,
+      have: Array(K).fill(false),
       doneAt: null,
       firstAt: null,
       received: 0,
@@ -121,14 +148,17 @@ export class Simulation {
       this.latency.set(e.b * 1000 + e.a, lat);
     }
     const src = this.nodes[0];
-    src.hasBlock = true;
+    src.have.fill(true);
     src.rank = K;
     src.doneAt = 0;
-    const neighbors = this.topo.nodes[0].neighbors;
+    const nbs = this.topo.nodes[0].neighbors;
     if (cfg.mode === "traditional") {
-      neighbors.forEach((nb) => this.send(0, nb, "full", K));
+      // each original piece goes to SOURCE_COPIES different neighbours
+      for (let j = 0; j < K; j++)
+        for (let t = 0; t < Math.min(SOURCE_COPIES, nbs.length); t++) this.send(0, nbs[(j + t) % nbs.length], "piece", j, K);
     } else {
-      for (let i = 0; i < EDGE_CAP; i++) neighbors.forEach((nb) => this.send(0, nb, "coded", K));
+      // K * SOURCE_COPIES coded packets, round-robin across neighbours
+      for (let i = 0; i < K * SOURCE_COPIES; i++) this.send(0, nbs[i % nbs.length], "coded", -1, K);
     }
   }
 
@@ -143,45 +173,65 @@ export class Simulation {
     return false;
   }
 
-  /** Median reconstruction time over peers that have reconstructed. */
-  get medianDone(): number | null {
+  /** Sorted reconstruction times of all peers; peers not yet reconstructed count as Infinity. */
+  private sortedDone(): number[] {
     const v: number[] = [];
-    for (let i = 1; i < this.nodes.length; i++) {
-      const d = this.nodes[i].doneAt;
-      if (d !== null) v.push(d);
-    }
+    for (let i = 1; i < this.nodes.length; i++) v.push(this.nodes[i].doneAt ?? Infinity);
+    return v.sort((a, b) => a - b);
+  }
+
+  get medianDone(): number | null {
+    const v = this.sortedDone().filter(Number.isFinite);
     if (!v.length) return null;
-    v.sort((a, b) => a - b);
     const m = v.length >> 1;
     return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
   }
+  get firstDone(): number | null {
+    const v = this.sortedDone();
+    return Number.isFinite(v[0]) ? v[0] : null;
+  }
+  /** Time by which 95% of peers had reconstructed (null until that happens). */
+  get p95Done(): number | null {
+    return percentile(this.sortedDone(), 0.95);
+  }
+  get lastDone(): number | null {
+    const v = this.sortedDone();
+    const l = v[v.length - 1];
+    return Number.isFinite(l) ? l : null;
+  }
 
-  private send(from: number, to: number, kind: "full" | "coded", senderRank: number, retry = false) {
+  private send(from: number, to: number, kind: "piece" | "coded", piece: number, senderRank: number, retry = false) {
     const p = PARAMS[this.cfg.condition];
-    const size = kind === "full" ? 1 : 1 / K;
     const key = from * 1000 + to;
-    const begin = Math.max(this.edgeFree.get(key) ?? 0, this.clock);
-    const tx = size * p.serial;
-    const jit = 1 + (this.rng() - 0.5) * p.jitter;
+    const n = this.edgeCount.get(key) ?? 0;
+    this.edgeCount.set(key, n + 1);
+    // network conditions depend only on (link, nth packet on that link) so both modes face the same draws
+    const jr = mulberry32(hash(this.seed, from, to, n, 1))();
+    const lr = mulberry32(hash(this.seed, from, to, n, 2))();
+    // each peer has one uplink shared by all of its outgoing links, so every extra copy delays the rest
+    const begin = Math.max(this.uplinkFree.get(from) ?? 0, this.clock);
+    const tx = PIECE_SIZE * p.serial;
+    const jit = 1 + (jr - 0.5) * p.jitter;
     const arrive = begin + tx + (this.latency.get(key) ?? 0.4) * p.lat * jit;
-    this.edgeFree.set(key, begin + tx);
+    this.uplinkFree.set(from, begin + tx);
     if (kind === "coded") this.edgeSent.set(key, (this.edgeSent.get(key) ?? 0) + 1);
     this.packets.push({
       id: this.nextId++,
       from,
       to,
       kind,
-      size,
+      piece,
+      size: PIECE_SIZE,
       start: begin,
       arrive,
-      lost: this.rng() < p.loss,
+      lost: lr < p.loss,
       retry,
       senderRank,
       tint: Math.floor(this.rng() * 4),
       tint2: Math.floor(this.rng() * 4),
     });
     this.counters.sent++;
-    this.counters.dataUnits += size;
+    this.counters.dataUnits += PIECE_SIZE;
   }
 
   private sentOn(from: number, to: number) {
@@ -197,13 +247,13 @@ export class Simulation {
       const j = Math.floor(this.rng() * (i + 1));
       [cand[i], cand[j]] = [cand[j], cand[i]];
     }
-    cand.slice(0, count).forEach((n) => this.send(node, n, "coded", rank));
+    cand.slice(0, count).forEach((n) => this.send(node, n, "coded", -1, rank));
   }
 
   private arrival(p: Packet) {
     if (p.lost) {
       this.counters.lost++;
-      if (p.kind === "full" && !p.retry) this.pending.push({ at: p.arrive + 1.0, from: p.from, to: p.to });
+      if (p.kind === "piece" && !p.retry) this.pending.push({ at: p.arrive + 1.0, from: p.from, to: p.to, piece: p.piece });
       return;
     }
     const n = this.nodes[p.to];
@@ -211,15 +261,18 @@ export class Simulation {
     n.received++;
     if (n.firstAt === null) n.firstAt = p.arrive;
 
-    if (p.kind === "full") {
-      if (n.hasBlock) return this.markRedundant(p, n);
-      n.hasBlock = true;
-      n.rank = K;
-      n.doneAt = p.arrive;
-      this.pulses.push({ node: p.to, t: this.time, kind: "done" });
+    if (p.kind === "piece") {
+      if (n.have[p.piece]) return this.markRedundant(p, n);
+      n.have[p.piece] = true;
+      n.rank++;
+      // flood the new piece onward, unchanged
       this.topo.nodes[p.to].neighbors
-        .filter((nb) => nb !== p.from)
-        .forEach((nb) => this.send(p.to, nb, "full", K));
+        .filter((nb) => nb !== p.from && nb !== 0)
+        .forEach((nb) => this.send(p.to, nb, "piece", p.piece, n.rank));
+      if (n.rank >= K) {
+        n.doneAt = p.arrive;
+        this.pulses.push({ node: p.to, t: this.time, kind: "done" });
+      }
       return;
     }
 
@@ -228,7 +281,6 @@ export class Simulation {
     if (this.rng() >= chance) return this.markRedundant(p, n);
     n.rank++;
     if (n.rank >= K) {
-      n.hasBlock = true;
       n.doneAt = p.arrive;
       this.pulses.push({ node: p.to, t: this.time, kind: "done" });
       this.announceDone(p.to);
@@ -239,10 +291,7 @@ export class Simulation {
     }
   }
 
-  /**
-   * Repair step: peers that have reconstructed can mint fresh coded packets, so
-   * a neighbour that lost some packets can still catch up. Bounded per edge.
-   */
+  /** Repair: reconstructed peers keep minting fresh coded packets for neighbours that still need them. */
   private topUp(): number {
     let sent = 0;
     for (let i = 0; i < this.nodes.length; i++) {
@@ -251,16 +300,13 @@ export class Simulation {
         (n) => n !== 0 && this.sentOn(i, n) < EDGE_CAP + 6 && !this.knownDone(i, n),
       );
       if (!cand.length) continue;
-      this.send(i, cand[Math.floor(this.rng() * cand.length)], "coded", K);
+      this.send(i, cand[Math.floor(this.rng() * cand.length)], "coded", -1, K);
       sent++;
     }
     return sent;
   }
 
-  /**
-   * IDONTWANT-style signal: once a peer has decoded, its neighbours stop sending it
-   * shards. Shards a neighbour has not started transmitting yet are withdrawn.
-   */
+  /** IDONTWANT-style signal: neighbours stop sending to a decoded peer; unsent packets are withdrawn. */
   private announceDone(node: number) {
     for (const nb of this.topo.nodes[node].neighbors) {
       const lat = this.latency.get(nb * 1000 + node) ?? 0.4;
@@ -303,7 +349,7 @@ export class Simulation {
     while (this.pending.length && this.pending[0].at <= this.time) {
       const r = this.pending.shift()!;
       this.clock = r.at;
-      this.send(r.from, r.to, "full", K, true);
+      this.send(r.from, r.to, "piece", r.piece, K, true);
     }
     for (;;) {
       let idx = -1;
@@ -332,14 +378,36 @@ export class Simulation {
       this.history.push({ t: this.time, cov: this.doneCount / this.peerCount });
     }
     const allDone = this.doneCount === this.peerCount;
-    const stalled =
-      this.packets.length === 0 && this.pending.length === 0 && (this.cfg.mode === "traditional" || (topUps === 0 && this.time >= this.nextTopUp - 0.25 && this.time > 1));
+    const idle = this.packets.length === 0 && this.pending.length === 0;
+    const stalled = idle && (this.cfg.mode === "traditional" || (topUps === 0 && this.time > 1));
     if (allDone || stalled || this.time > MAX_TIME) {
       this.finished = true;
       this.endTime = this.time;
       this.packets = [];
       this.history.push({ t: this.time, cov: this.doneCount / this.peerCount });
     }
+  }
+
+  summary(): RunSummary {
+    const first = this.firstDone;
+    const p95 = this.p95Done;
+    return {
+      history: this.history,
+      complete: this.doneCount === this.peerCount,
+      peers: this.peerCount,
+      done: this.doneCount,
+      firstDone: first,
+      p95Done: p95,
+      lastDone: this.lastDone,
+      median: this.medianDone,
+      spread: first !== null && p95 !== null ? p95 - first : null,
+      packetsSent: this.counters.sent,
+      redundantPackets: this.counters.redundant,
+      redundantUnits: this.counters.redundantUnits,
+      dataUnits: this.counters.dataUnits,
+      lost: this.counters.lost,
+      redundantShare: this.counters.delivered ? this.counters.redundant / this.counters.delivered : 0,
+    };
   }
 }
 
@@ -348,8 +416,14 @@ export interface RunSummary {
   complete: boolean;
   peers: number;
   done: number;
+  firstDone: number | null;
+  p95Done: number | null;
   lastDone: number | null;
   median: number | null;
+  /** p95 reconstruction time minus first reconstruction time (sim s) */
+  spread: number | null;
+  packetsSent: number;
+  redundantPackets: number;
   redundantUnits: number;
   dataUnits: number;
   lost: number;
@@ -358,7 +432,7 @@ export interface RunSummary {
 
 const runCache = new Map<string, RunSummary>();
 
-/** Headless full run for the same config; deterministic, so matches the live lab. */
+/** Headless full run for the same config; deterministic, so it matches the live lab exactly. */
 export function runToCompletion(cfg: SimConfig): RunSummary {
   const key = `${cfg.mode}|${cfg.size}|${cfg.condition}`;
   const hit = runCache.get(key);
@@ -366,23 +440,7 @@ export function runToCompletion(cfg: SimConfig): RunSummary {
   const sim = new Simulation(cfg);
   let guard = 0;
   while (!sim.finished && guard++ < 20000) sim.advance(STEP);
-  let last: number | null = null;
-  for (let i = 1; i < sim.nodes.length; i++) {
-    const d = sim.nodes[i].doneAt;
-    if (d !== null && (last === null || d > last)) last = d;
-  }
-  const out: RunSummary = {
-    history: sim.history,
-    complete: sim.doneCount === sim.peerCount,
-    peers: sim.peerCount,
-    done: sim.doneCount,
-    lastDone: last,
-    median: sim.medianDone,
-    redundantUnits: sim.counters.redundantUnits,
-    dataUnits: sim.counters.dataUnits,
-    lost: sim.counters.lost,
-    redundantShare: sim.counters.delivered ? sim.counters.redundant / sim.counters.delivered : 0,
-  };
+  const out = sim.summary();
   runCache.set(key, out);
   return out;
 }

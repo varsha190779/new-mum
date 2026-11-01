@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { K } from "@/lib/sim/engine";
+import { PIECE_COLORS } from "@/lib/sim/palette";
 
-const PIECE_FILL = ["#1E8A4C", "#3FA66B", "#146B39"];
+const PIECE_FILL = PIECE_COLORS;
 
 function StageOne() {
   return (
@@ -17,8 +18,7 @@ function StageOne() {
             width="40"
             height="28"
             rx="6"
-            fill={PIECE_FILL[i % 3]}
-            opacity={0.92 - (i % 3) * 0.1}
+            fill={PIECE_FILL[i]}
           />
           <text x={52 + (i % 4) * 46} y={50 + Math.floor(i / 4) * 33} textAnchor="middle" fontSize="11" fontWeight="600" fill="#fff">
             P{i + 1}
@@ -48,7 +48,7 @@ function StageTwo() {
             C{r + 1}
           </text>
           {row.map((on, i) => (
-            <circle key={i} cx={64 + i * 20} cy="15" r="5.5" fill={on ? PIECE_FILL[i % 3] : "#fff"} stroke={on ? "none" : "#D5D5CD"} />
+            <circle key={i} cx={64 + i * 20} cy="15" r="5.5" fill={on ? PIECE_FILL[i] : "#fff"} stroke={on ? "none" : "#D5D5CD"} />
           ))}
         </g>
       ))}
@@ -167,8 +167,7 @@ function StageFour() {
           width="40"
           height="28"
           rx="6"
-          fill={PIECE_FILL[i % 3]}
-          opacity={0.92 - (i % 3) * 0.1}
+          fill={PIECE_FILL[i]}
         />
       ))}
       <circle cx="120" cy="116" r="10" fill="#1E8A4C" />
@@ -183,7 +182,7 @@ function StageFour() {
 const STAGES = [
   {
     title: "Original data",
-    body: `The message is padded and split into k pieces (shown here as k = ${K}; the real value is a protocol parameter). Traditional forwarding keeps it whole.`,
+    body: `The message is padded and split into k pieces (shown here as k = ${K}; the real value is a protocol parameter). Traditional forwarding passes these original pieces on unchanged.`,
     art: <StageOne />,
   },
   {

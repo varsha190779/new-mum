@@ -19,7 +19,7 @@ export function MetricsPanel({ sim, mode, frame }: { sim: Simulation; mode: Mode
   void frame;
   const c = sim.counters;
   const done = sim.doneCount;
-  const median = sim.medianDone;
+  const p95 = sim.p95Done;
   const other: Mode = mode === "mump2p" ? "traditional" : "mump2p";
   const ghost = runToCompletion({ size: sim.cfg.size, condition: sim.cfg.condition, mode: other });
   const mine = [...sim.history, { t: sim.time, cov: done / sim.peerCount }];
@@ -39,7 +39,7 @@ export function MetricsPanel({ sim, mode, frame }: { sim: Simulation; mode: Mode
       <div className="grid grid-cols-2 gap-2.5">
         <Tile label="Peers reconstructed" value={`${done}`} unit={`/ ${sim.peerCount}`} sub={`${Math.round((done / sim.peerCount) * 100)}% coverage`} />
         <Tile label="Elapsed" value={sim.time.toFixed(1)} unit="sim s" sub={sim.finished ? "run complete" : "simulated time"} />
-        <Tile label="Median reconstruction" value={median === null ? "—" : median.toFixed(1)} unit={median === null ? undefined : "sim s"} sub="among finished peers" />
+        <Tile label="95% of peers by" value={p95 === null ? "—" : p95.toFixed(1)} unit={p95 === null ? undefined : "sim s"} sub="time to reconstruct" />
         <Tile label="Packets sent" value={`${c.sent}`} sub={`${c.lost} lost in transit`} />
         <Tile label="Redundant data" value={c.redundantUnits.toFixed(1)} unit="blocks" sub={`${sharePct}% of deliveries`} />
         <Tile label="Data moved" value={c.dataUnits.toFixed(1)} unit="blocks" sub="block-equivalents" />

@@ -2,6 +2,7 @@ const LINKS = [
   { href: "#lab", label: "Lab" },
   { href: "#how", label: "How it works" },
   { href: "#compare", label: "Compare" },
+  { href: "#report", label: "Report" },
   { href: "#why", label: "Why it matters" },
 ];
 

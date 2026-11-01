@@ -7,7 +7,8 @@ import { useObservatory } from "../ObservatoryContext";
 import { ControlButton, Segmented, useMediaQuery } from "./ui";
 import { NetworkCanvas } from "./NetworkCanvas";
 import { MetricsPanel } from "./MetricsPanel";
-import { StageStrip } from "./StageStrip";
+import { StepFlow } from "./StageStrip";
+import { RunResults } from "./RunResults";
 
 type Status = "idle" | "running" | "paused" | "complete";
 
@@ -71,12 +72,21 @@ export function NetworkLab() {
           <div>
             <p className="eyebrow">Network Propagation Lab</p>
             <h2 className="mt-1.5 text-2xl font-semibold tracking-[-0.02em] sm:text-[28px]">
-              Send one block across the network
+              Watch a block travel through the network.
             </h2>
+            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-ink-2">
+              Compare how traditional P2P and mump2p distribute blockchain data between peers.
+            </p>
           </div>
-          <p className="max-w-sm text-[13px] leading-relaxed text-ink-3">
-            Choose a mode, press Start, and hover any node. Everything here runs locally from a seeded simulation.
-          </p>
+          <div className="max-w-xs space-y-1.5 sm:text-right">
+            <a
+              href="#report"
+              className="inline-block rounded-full border border-line bg-paper px-3 py-1 text-[11px] font-medium text-ink-2 hover:border-ink-4"
+            >
+              Illustrative simulation based on a historical performance report.
+            </a>
+            <p className="text-[12px] leading-relaxed text-ink-3">Press Start, then hover any node for its status.</p>
+          </div>
         </div>
 
         {/* controls */}
@@ -138,6 +148,16 @@ export function NetworkLab() {
           </div>
         </div>
 
+        <div className="mt-3 flex items-start gap-3 rounded-2xl border border-line bg-white px-4 py-3">
+          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${mode === "mump2p" ? "bg-accent" : "bg-ink"}`} />
+          <p className="text-sm leading-relaxed text-ink-2">
+            <span className="font-semibold text-ink">{mode === "mump2p" ? "mump2p + RLNC. " : "Traditional P2P. "}</span>
+            {mode === "mump2p"
+              ? "Peers exchange coded packets. A receiver can reconstruct the block after collecting enough independent information, without waiting for a specific missing packet."
+              : "Peers forward original data to other peers. A receiver may need to wait for missing pieces before it can reconstruct the block."}
+          </p>
+        </div>
+
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
           <div className="min-w-0 space-y-3">
             <div className="relative overflow-hidden rounded-2xl border border-line bg-[#FBFBF9] p-2 sm:p-4">
@@ -150,12 +170,21 @@ export function NetworkLab() {
                 </div>
               )}
             </div>
-            <StageStrip sim={sim} mode={mode} frame={frame} />
+            <StepFlow sim={sim} mode={mode} frame={frame} />
             <Legend mode={mode} />
           </div>
           <div className="rounded-2xl border border-line p-3.5 sm:p-4">
             <MetricsPanel sim={sim} mode={mode} frame={frame} />
           </div>
+        </div>
+        <div className="mt-4">
+          {status === "complete" ? (
+            <RunResults mode={mode} size={size} condition={condition} />
+          ) : (
+            <p className="rounded-2xl border border-dashed border-line-2 px-4 py-4 text-center text-sm text-ink-3">
+              When the run finishes, this area explains what happened and compares both modes under the same conditions.
+            </p>
+          )}
         </div>
         <p aria-live="polite" className="sr-only">
           {status === "complete" ? `Run complete. ${sim.doneCount} of ${sim.peerCount} peers reconstructed.` : ""}
@@ -171,10 +200,11 @@ function Legend({ mode }: { mode: Mode }) {
     <ul className="flex flex-wrap gap-x-5 gap-y-2 px-1 text-xs text-ink-3">
       {mode === "traditional" ? (
         <li className={item}>
-          <svg width="18" height="12" aria-hidden="true">
-            <rect x="0" y="0" width="18" height="12" rx="3" fill="#0C100D" />
+          <svg width="30" height="14" aria-hidden="true">
+            <rect x="0" y="0" width="13" height="13" rx="3.5" fill="#146B39" />
+            <rect x="16" y="0" width="13" height="13" rx="3.5" fill="#3FA66B" />
           </svg>
-          Full block copy
+          Original piece (colour and number = piece)
         </li>
       ) : (
         <li className={item}>
@@ -184,18 +214,16 @@ function Legend({ mode }: { mode: Mode }) {
             <circle cx="22" cy="6" r="5" fill="#146B39" />
             <circle cx="22" cy="6" r="2" fill="#9FD1B3" />
           </svg>
-          Coded packet (a different combination each)
+          Coded packet (a different mix each)
         </li>
       )}
-      {mode === "mump2p" && (
-        <li className={item}>
-          <svg width="16" height="16" aria-hidden="true">
-            <circle cx="8" cy="8" r="6" fill="none" stroke="#E3E3DC" strokeWidth="2.5" />
-            <circle cx="8" cy="8" r="6" fill="none" stroke="#1E8A4C" strokeWidth="2.5" strokeDasharray="22 38" transform="rotate(-90 8 8)" />
-          </svg>
-          Independent packets collected
-        </li>
-      )}
+      <li className={item}>
+        <svg width="16" height="16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="#E3E3DC" strokeWidth="2.5" />
+          <circle cx="8" cy="8" r="6" fill="none" stroke="#1E8A4C" strokeWidth="2.5" strokeDasharray="22 38" transform="rotate(-90 8 8)" />
+        </svg>
+        {mode === "mump2p" ? "Independent packets collected" : "Distinct pieces collected"}
+      </li>
       <li className={item}>
         <svg width="16" height="16" aria-hidden="true">
           <circle cx="8" cy="8" r="7" fill="#1E8A4C" />
@@ -204,9 +232,9 @@ function Legend({ mode }: { mode: Mode }) {
       </li>
       <li className={item}>
         <svg width="16" height="16" aria-hidden="true">
-          <circle cx="8" cy="8" r="6" fill="none" stroke="#9AA09B" />
+          <circle cx="8" cy="8" r="6" fill="none" stroke="#9AA09B" strokeDasharray="3 3" />
         </svg>
-        Redundant arrival
+        {mode === "traditional" ? "Duplicate arrival" : "Arrival that added nothing new"}
       </li>
       <li className={item}>
         <svg width="14" height="14" aria-hidden="true">

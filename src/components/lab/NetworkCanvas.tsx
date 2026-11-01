@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { K, type Mode, type Simulation } from "@/lib/sim/engine";
+import { PIECE_COLORS } from "@/lib/sim/palette";
 
 const TINT = ["#1E8A4C", "#3FA66B", "#146B39", "#0C100D"];
 const TINT_IN = ["#FFFFFF", "#CFE8D9", "#9FD1B3", "#E7F3EB"];
@@ -71,11 +72,13 @@ export function NetworkCanvas({
           <path d="M-4 -4l8 8M4 -4l-8 8" stroke="#B4572F" strokeWidth="1.8" strokeLinecap="round" />
         </g>,
       );
-    } else if (p.kind === "full") {
+    } else if (p.kind === "piece") {
       flying.push(
         <g key={p.id} transform={`translate(${x} ${y})`}>
-          <rect x="-9" y="-6" width="18" height="12" rx="3" fill="#0C100D" />
-          <path d="M-3 -6v12M3 -6v12M-9 0h18" stroke="#6B726D" strokeWidth="0.8" />
+          <rect x="-7" y="-7" width="14" height="14" rx="3.5" fill={PIECE_COLORS[p.piece]} stroke="#fff" strokeWidth="1" />
+          <text y="3" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="#fff">
+            {p.piece + 1}
+          </text>
         </g>,
       );
     } else {
@@ -96,10 +99,10 @@ export function NetworkCanvas({
 
   const statusText = (id: number) => {
     const n = sim.nodes[id];
-    if (id === 0) return mode === "mump2p" ? "Origin: emits coded packets" : "Origin: sends full copies";
+    if (id === 0) return mode === "mump2p" ? "Origin: sends coded packets" : "Origin: sends original pieces";
     if (n.doneAt !== null) return `Reconstructed at ${n.doneAt.toFixed(1)}s`;
-    if (mode === "mump2p" && n.rank > 0) return `Collecting: ${n.rank}/${K} independent packets`;
-    return mode === "mump2p" ? "Waiting for coded packets" : "Waiting for a full copy";
+    if (n.rank > 0) return mode === "mump2p" ? `Collecting: ${n.rank}/${K} independent packets` : `Collecting: ${n.rank}/${K} distinct pieces`;
+    return mode === "mump2p" ? "Waiting for coded packets" : "Waiting for original pieces";
   };
 
   const srcPos = pos[0];
@@ -143,34 +146,14 @@ export function NetworkCanvas({
           );
         })}
 
-        {/* source data: one block vs K pieces */}
+        {/* source data: the K original pieces (coded into mixes in mump2p mode) */}
         <g transform={`translate(${pieceX} ${pieceY})`} aria-hidden="true">
-          {mode === "traditional" ? (
-            <>
-              <rect width="44" height="20" rx="4" fill="#0C100D" />
-              <text x="22" y="-7" textAnchor="middle" fontSize="10" fill="#6B726D">
-                1 block
-              </text>
-            </>
-          ) : (
-            <>
-              {Array.from({ length: K }).map((_, i) => (
-                <rect
-                  key={i}
-                  x={(i % 4) * 11.5}
-                  y={Math.floor(i / 4) * 11.5}
-                  width="9.5"
-                  height="9.5"
-                  rx="2"
-                  fill={TINT[i % 3]}
-                  opacity={0.9 - (i % 3) * 0.12}
-                />
-              ))}
-              <text x="22" y="-7" textAnchor="middle" fontSize="10" fill="#6B726D">
-                {K} pieces
-              </text>
-            </>
-          )}
+          {Array.from({ length: K }).map((_, i) => (
+            <rect key={i} x={(i % 4) * 11.5} y={Math.floor(i / 4) * 11.5} width="9.5" height="9.5" rx="2.2" fill={PIECE_COLORS[i]} />
+          ))}
+          <text x="22" y="-7" textAnchor="middle" fontSize="10" fill="#6B726D">
+            {mode === "traditional" ? `${K} original pieces` : `${K} pieces → coded`}
+          </text>
         </g>
 
         {/* nodes */}
@@ -182,7 +165,7 @@ export function NetworkCanvas({
           const rad = isSrc ? 16 : L.r;
           const ringR = rad + 5;
           const circ = 2 * Math.PI * ringR;
-          const partial = mode === "mump2p" && !done ? s.rank / K : 0;
+          const partial = !done ? s.rank / K : 0;
           const isHover = hover === n.id;
           return (
             <g
@@ -233,24 +216,34 @@ export function NetworkCanvas({
         })}
 
         {/* pulses */}
-        {sim.pulses.map((p, i) => {
+        {(() => {
+          const labelled = new Set<number>();
+          return [...sim.pulses].reverse().map((p, i) => {
           const age = (sim.time - p.t) / PULSE_LIFE;
           if (age < 0 || age > 1) return null;
           const { x, y } = pos[p.node];
+          const done = p.kind === "done";
           return (
-            <circle
-              key={`${p.node}-${p.t}-${i}`}
-              cx={x}
-              cy={y}
-              r={L.r + age * 14}
-              fill="none"
-              stroke={p.kind === "done" ? "#1E8A4C" : "#9AA09B"}
-              strokeWidth={p.kind === "done" ? 2 : 1.2}
-              opacity={(1 - age) * (p.kind === "done" ? 0.8 : 0.55)}
-              pointerEvents="none"
-            />
+            <g key={`${p.node}-${p.t}-${i}`} pointerEvents="none">
+              <circle
+                cx={x}
+                cy={y}
+                r={L.r + age * 14}
+                fill="none"
+                stroke={done ? "#1E8A4C" : "#9AA09B"}
+                strokeWidth={done ? 2 : 1.2}
+                strokeDasharray={done ? undefined : "3 3"}
+                opacity={(1 - age) * (done ? 0.8 : 0.7)}
+              />
+              {!done && !labelled.has(p.node) && labelled.add(p.node) && age < 0.7 && (
+                <text x={x} y={y - L.r - 8 - age * 8} textAnchor="middle" fontSize="9" fill="#6B726D" opacity={(1 - age / 0.7) * 0.9}>
+                  {mode === "traditional" ? "duplicate" : "not new"}
+                </text>
+              )}
+            </g>
           );
-        })}
+          });
+        })()}
 
         <g pointerEvents="none">{flying}</g>
       </svg>
@@ -274,11 +267,31 @@ export function NetworkCanvas({
           <p className={`mt-1.5 text-[13px] ${hn.doneAt !== null ? "font-medium text-accent-dark" : "text-ink-2"}`}>
             {statusText(hovered.id)}
           </p>
-          {mode === "mump2p" && hovered.id !== 0 && (
+          {hovered.id !== 0 && mode === "mump2p" && (
             <div className="mt-2 flex gap-[3px]" aria-hidden="true">
               {Array.from({ length: K }).map((_, i) => (
                 <span key={i} className={`h-1.5 flex-1 rounded-full ${i < hn.rank ? "bg-accent" : "bg-line"}`} />
               ))}
+            </div>
+          )}
+          {hovered.id !== 0 && mode === "traditional" && (
+            <div className="mt-2" aria-hidden="true">
+              <div className="flex gap-[3px]">
+                {hn.have.map((h, i) => (
+                  <span
+                    key={i}
+                    className="num flex h-[18px] flex-1 items-center justify-center rounded text-[9px] font-semibold"
+                    style={h ? { background: PIECE_COLORS[i], color: "#fff" } : { border: "1px dashed #C9C9C0", color: "#9AA09B" }}
+                  >
+                    {i + 1}
+                  </span>
+                ))}
+              </div>
+              {hn.doneAt === null && hn.rank > 0 && (
+                <p className="mt-1.5 text-[11px] text-ink-3">
+                  Still waiting for piece{hn.have.filter((h) => !h).length > 1 ? "s" : ""} {hn.have.map((h, i) => (h ? null : i + 1)).filter(Boolean).join(", ")}
+                </p>
+              )}
             </div>
           )}
           <dl className="num mt-2.5 grid grid-cols-3 gap-2 border-t border-line pt-2.5 text-[11px] text-ink-3">
@@ -287,7 +300,7 @@ export function NetworkCanvas({
               <dd className="text-sm font-medium text-ink">{hn.received}</dd>
             </div>
             <div>
-              <dt>Redundant</dt>
+              <dt>{mode === "traditional" ? "Duplicates" : "Not new"}</dt>
               <dd className="text-sm font-medium text-ink">{hn.redundant}</dd>
             </div>
             <div>

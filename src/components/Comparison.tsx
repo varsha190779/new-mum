@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { K, runToCompletion, type RunSummary } from "@/lib/sim/engine";
+import { PIECE_COLORS } from "@/lib/sim/palette";
 import { useObservatory } from "./ObservatoryContext";
 import { ChartLegend, CoverageChart } from "./lab/CoverageChart";
 
@@ -11,15 +12,15 @@ function Schematic({ kind }: { kind: "traditional" | "mump2p" }) {
   const ups = [44, 100, 156];
   const trad = kind === "traditional";
   return (
-    <svg viewBox="0 0 360 200" className="block w-full" role="img" aria-label={trad ? "Three peers each send an identical full block copy to one receiver" : "Three peers each send a different coded packet to one receiver"}>
+    <svg viewBox="0 0 360 200" className="block w-full" role="img" aria-label={trad ? "Three peers each send the same original piece to one receiver" : "Three peers each send a different coded packet to one receiver"}>
       {ups.map((y, i) => (
         <g key={y}>
           <line x1="52" y1={y} x2="290" y2="100" stroke="#E3E3DC" strokeWidth="1.5" />
           <circle cx="40" cy={y} r="11" fill="#fff" stroke="#C9C9C0" strokeWidth="1.5" />
           {trad ? (
-            <g transform={`translate(${150 + (i === 1 ? 14 : 0) - (i === 0 ? 0 : 0)} ${y + (100 - y) * 0.42 - 7})`} opacity={i === 0 ? 1 : 0.38}>
-              <rect width="22" height="14" rx="3.5" fill="#0C100D" />
-              <path d="M7 0v14M15 0v14M0 7h22" stroke="#6B726D" strokeWidth="0.8" />
+            <g transform={`translate(${150 + (i === 1 ? 14 : 0)} ${y + (100 - y) * 0.42 - 8})`} opacity={i === 0 ? 1 : 0.4}>
+              <rect width="16" height="16" rx="4" fill={PIECE_COLORS[2]} />
+              <text x="8" y="11.5" textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff">3</text>
             </g>
           ) : (
             <g transform={`translate(${160 + i * 6} ${y + (100 - y) * 0.45})`}>
@@ -53,18 +54,18 @@ function fmt(v: number | null, d = 1) {
 
 const ROWS: { label: string; get: (r: RunSummary) => string; unit?: string }[] = [
   { label: "Peers reconstructed", get: (r) => `${r.done} / ${r.peers}` },
-  { label: "Median reconstruction", get: (r) => fmt(r.median), unit: "sim s" },
-  { label: "Last peer reconstructed", get: (r) => fmt(r.lastDone), unit: "sim s" },
+  { label: "95% of peers by", get: (r) => fmt(r.p95Done), unit: "sim s" },
+  { label: "Arrival spread (p95 − first)", get: (r) => fmt(r.spread), unit: "sim s" },
   { label: "Redundant data", get: (r) => fmt(r.redundantUnits), unit: "blocks" },
   { label: "Data moved", get: (r) => fmt(r.dataUnits), unit: "blocks" },
   { label: "Packets lost", get: (r) => `${r.lost}` },
 ];
 
 const DIFFS = [
-  ["What is forwarded", "The whole block, as an identical copy", "Coded packets, each a different combination"],
-  ["When relaying starts", "After a full copy has arrived", "Once a peer holds enough shards, before the message is complete"],
-  ["Duplicate arrivals", "Identical copies carry nothing new", "Independent packets each add information"],
-  ["When something is lost", "That particular copy has to be resent or found elsewhere", "Any further independent packet fills the gap"],
+  ["What is forwarded", "Original pieces, passed on unchanged", "Coded packets, each a different mix of the pieces"],
+  ["What a peer needs", "Every distinct original piece", "Enough independent packets, whichever they are"],
+  ["Repeat arrivals", "A repeated piece carries nothing new", "Independent packets each add information; dependent ones add nothing"],
+  ["When something is lost", "That specific piece must be resent or arrive another way", "Any further independent packet fills the gap"],
 ];
 
 export function Comparison() {
@@ -95,7 +96,7 @@ export function Comparison() {
       <div className="mt-10 grid gap-4 lg:grid-cols-2">
         {(
           [
-            ["traditional", "Traditional gossip forwarding", "Each peer relays whole messages to its mesh peers (as in GossipSub-style gossip), so several neighbours often deliver the same message."],
+            ["traditional", "Traditional P2P forwarding", "Peers forward original pieces to their neighbours. The same piece can arrive from several peers, and a peer needs every piece before it can rebuild the block."],
             ["mump2p", "mump2p + RLNC", "Peers relay recoded shards on the same kind of mesh. Shards from different neighbours can each add new information, and decoded peers tell neighbours to stop sending."],
           ] as const
         ).map(([k, title, text]) => (
