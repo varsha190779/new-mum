@@ -1,0 +1,86 @@
+@font-face {
+  font-family: "Inter Variable";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 88px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: #cfe8d8;
+  }
+  :focus-visible {
+    outline: 2px solid #1e8a4c;
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-3;
+  }
+  .panel {
+    @apply rounded-panel border border-line bg-panel shadow-panel;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.flow-line {
+  stroke-dasharray: 4 8;
+  animation: dash-flow 1.4s linear infinite;
+}
+.reveal {
+  animation: rise-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .flow-line,
+  .reveal {
+    animation: none;
+  }
+}
