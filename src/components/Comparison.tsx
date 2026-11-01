@@ -62,7 +62,7 @@ const ROWS: { label: string; get: (r: RunSummary) => string; unit?: string }[] =
 
 const DIFFS = [
   ["What is forwarded", "The whole block, as an identical copy", "Coded packets, each a different combination"],
-  ["When relaying starts", "After a full copy has arrived", "As packets arrive, before the block is complete"],
+  ["When relaying starts", "After a full copy has arrived", "Once a peer holds enough shards, before the message is complete"],
   ["Duplicate arrivals", "Identical copies carry nothing new", "Independent packets each add information"],
   ["When something is lost", "That particular copy has to be resent or found elsewhere", "Any further independent packet fills the gap"],
 ];
@@ -95,8 +95,8 @@ export function Comparison() {
       <div className="mt-10 grid gap-4 lg:grid-cols-2">
         {(
           [
-            ["traditional", "Traditional P2P forwarding", "Each peer relays whole copies. Several neighbours often deliver the same block."],
-            ["mump2p", "mump2p + RLNC", "Peers relay coded packets. Packets arriving from different neighbours can each add new information."],
+            ["traditional", "Traditional gossip forwarding", "Each peer relays whole messages to its mesh peers (as in GossipSub-style gossip), so several neighbours often deliver the same message."],
+            ["mump2p", "mump2p + RLNC", "Peers relay recoded shards on the same kind of mesh. Shards from different neighbours can each add new information, and decoded peers tell neighbours to stop sending."],
           ] as const
         ).map(([k, title, text]) => (
           <article key={k} className="panel p-5 sm:p-6">

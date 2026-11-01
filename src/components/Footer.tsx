@@ -11,6 +11,10 @@ export function Footer() {
             simulated; none of it is real-time Optimum telemetry or a benchmark of any production network.
           </p>
         </div>
+        <p className="max-w-md text-xs leading-relaxed text-ink-3 md:order-last">
+          Concepts follow Optimum's public docs, <a className="underline hover:text-ink" href="https://docs.getoptimum.xyz/docs/learn/overview/p2p" target="_blank" rel="noreferrer">mump2p protocol</a>, and the paper{" "}
+          <a className="underline hover:text-ink" href="https://arxiv.org/abs/2508.04833" target="_blank" rel="noreferrer">OptimumP2P (arXiv:2508.04833)</a>. Piece counts, thresholds and timings here are illustrative, not protocol defaults.
+        </p>
         <div className="flex gap-8 text-sm text-ink-2">
           <a className="hover:text-ink" href="#lab">Lab</a>
           <a className="hover:text-ink" href="#how">How it works</a>

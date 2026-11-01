@@ -183,22 +183,22 @@ function StageFour() {
 const STAGES = [
   {
     title: "Original data",
-    body: `A block is divided into ${K} equal pieces. Traditional forwarding keeps it whole.`,
+    body: `The message is padded and split into k pieces (shown here as k = ${K}; the real value is a protocol parameter). Traditional forwarding keeps it whole.`,
     art: <StageOne />,
   },
   {
     title: "Coded packets",
-    body: "RLNC builds each packet as a random linear combination of the pieces, so every coded packet looks different from the others.",
+    body: "The publisher creates more coded shards than pieces, each a random linear combination (over a finite field) of the pieces, and sends them to different peers.",
     art: <StageTwo />,
   },
   {
     title: "Network propagation",
-    body: "Coded packets spread across peers. A peer can recode what it already holds and relay it without waiting for the whole block.",
+    body: "Coded packets spread across the gossip mesh. Once a peer holds enough shards it can recode them and relay new combinations without waiting for the whole message.",
     art: <StageThree />,
   },
   {
     title: "Reconstruction",
-    body: `A peer rebuilds the block once it has gathered ${K} independent coded packets, the same count as pieces. Dependent packets add nothing, so it can need slightly more.`,
+    body: `A peer discards shards that are not linearly independent and decodes once it holds k independent ones (here ${K}). Dependent shards add nothing, so it may receive a few more than k.`,
     art: <StageFour />,
   },
 ];

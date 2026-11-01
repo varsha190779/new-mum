@@ -28,4 +28,8 @@ npm run test:sim # prints headless simulation results for every size/condition/m
 - A block is `K = 8` pieces. Traditional mode forwards the whole block store-and-forward, with one retry on loss.
 - mump2p mode forwards coded packets (1/K size) as soon as a peer gains new information. A packet is *likely*, not
   guaranteed, to be independent; dependent packets are counted as redundant, so a peer may need more than `K`.
+- mump2p mode also models two documented behaviours: peers start recoding/forwarding once they hold a few shards, and a
+  decoded peer signals neighbours to stop sending it shards (IDONTWANT-style). `k = 8`, thresholds and timings are
+  illustrative, not protocol defaults. See [mump2p docs](https://docs.getoptimum.xyz/docs/learn/overview/p2p) and
+  [arXiv:2508.04833](https://arxiv.org/abs/2508.04833).
 - Stable vs congested changes link latency, serialisation time and loss probability.

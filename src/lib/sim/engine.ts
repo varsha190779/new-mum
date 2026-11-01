@@ -27,6 +27,7 @@ export interface SimConfig {
 export const K = 8; // pieces per block
 const EDGE_CAP = K + 3; // max coded packets per directed edge
 const FANOUT = 2; // coded forwards per innovative packet
+const FORWARD_AFTER = 2; // peers start recoding/forwarding once they hold this many independent packets
 const P_INNOVATIVE = 0.94; // sender has info receiver lacks
 const P_INNOVATIVE_EQUAL = 0.3; // sender rank <= receiver rank
 const STEP = 1 / 60;
@@ -95,7 +96,8 @@ export class Simulation {
   private nextId = 1;
   private lastHist = 0;
   private residual = 0;
-  private nextTopUp = 0.5;
+  private nextTopUp = 0.25;
+  private doneKnownAt = new Map<number, number>();
 
   constructor(cfg: SimConfig) {
     this.cfg = cfg;
@@ -189,7 +191,7 @@ export class Simulation {
   private forwardCoded(node: number, exclude: number, count: number) {
     const rank = this.nodes[node].rank;
     const cand = this.topo.nodes[node].neighbors.filter(
-      (n) => n !== exclude && n !== 0 && this.sentOn(node, n) < EDGE_CAP,
+      (n) => n !== exclude && n !== 0 && this.sentOn(node, n) < EDGE_CAP && !this.knownDone(node, n),
     );
     for (let i = cand.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng() * (i + 1));
@@ -229,9 +231,10 @@ export class Simulation {
       n.hasBlock = true;
       n.doneAt = p.arrive;
       this.pulses.push({ node: p.to, t: this.time, kind: "done" });
+      this.announceDone(p.to);
       // a reconstructed peer can mint fresh independent packets for neighbours
       this.forwardCoded(p.to, p.from, FANOUT + 1);
-    } else {
+    } else if (n.rank >= FORWARD_AFTER) {
       this.forwardCoded(p.to, p.from, FANOUT);
     }
   }
@@ -245,13 +248,37 @@ export class Simulation {
     for (let i = 0; i < this.nodes.length; i++) {
       if (this.nodes[i].rank < K) continue;
       const cand = this.topo.nodes[i].neighbors.filter(
-        (n) => n !== 0 && this.sentOn(i, n) < EDGE_CAP + 6 && this.nodes[n].rank < K,
+        (n) => n !== 0 && this.sentOn(i, n) < EDGE_CAP + 6 && !this.knownDone(i, n),
       );
       if (!cand.length) continue;
       this.send(i, cand[Math.floor(this.rng() * cand.length)], "coded", K);
       sent++;
     }
     return sent;
+  }
+
+  /**
+   * IDONTWANT-style signal: once a peer has decoded, its neighbours stop sending it
+   * shards. Shards a neighbour has not started transmitting yet are withdrawn.
+   */
+  private announceDone(node: number) {
+    for (const nb of this.topo.nodes[node].neighbors) {
+      const lat = this.latency.get(nb * 1000 + node) ?? 0.4;
+      this.doneKnownAt.set(nb * 1000 + node, this.clock + lat);
+    }
+    this.packets = this.packets.filter((q) => {
+      if (q.to !== node || q.kind !== "coded") return true;
+      const at = this.doneKnownAt.get(q.from * 1000 + node);
+      if (at === undefined || q.start < at) return true;
+      this.counters.sent--;
+      this.counters.dataUnits -= q.size;
+      return false;
+    });
+  }
+
+  private knownDone(from: number, to: number) {
+    const at = this.doneKnownAt.get(from * 1000 + to);
+    return at !== undefined && at <= this.clock;
   }
 
   private markRedundant(p: Packet, n: NodeState) {
@@ -296,7 +323,7 @@ export class Simulation {
     this.clock = this.time;
     let topUps = 0;
     if (this.cfg.mode === "mump2p" && this.time >= this.nextTopUp) {
-      this.nextTopUp += 0.5;
+      this.nextTopUp += 0.25;
       topUps = this.topUp();
     }
     this.pulses = this.pulses.filter((x) => this.time - x.t < 0.9);
@@ -306,7 +333,7 @@ export class Simulation {
     }
     const allDone = this.doneCount === this.peerCount;
     const stalled =
-      this.packets.length === 0 && this.pending.length === 0 && (this.cfg.mode === "traditional" || (topUps === 0 && this.time >= this.nextTopUp - 0.5 && this.time > 1));
+      this.packets.length === 0 && this.pending.length === 0 && (this.cfg.mode === "traditional" || (topUps === 0 && this.time >= this.nextTopUp - 0.25 && this.time > 1));
     if (allDone || stalled || this.time > MAX_TIME) {
       this.finished = true;
       this.endTime = this.time;
